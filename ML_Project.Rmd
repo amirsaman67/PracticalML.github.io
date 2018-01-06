@@ -1,0 +1,118 @@
+---
+title: "Practical ML project"
+author: Amirsaman Hamzeh
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Data preprocessing
+
+In this section, we read the data files, clean them by taking care of NAs and highly correlated variables. 
+```{r DataPreprocessing1, echo=FALSE}
+library(caret)
+library(dplyr)
+library(corrplot)
+library(rpart)
+setwd("C:/Users/hamze/Dropbox/Coursera/Practical ML/Project")
+training <- read.csv("training.csv")
+testing <- read.csv("testing.csv")
+str(training)
+nalist <- lapply(training, function(m) sum(is.na(m))/length(m))
+```
+
+There are 160 variables in each dataset, most of which seem to have high percentage of NA values. Having found these variables, we can drop them from the both data sets. 
+A number of factor variables have meaningless data and can be dropped from the dataset including "kurtosis_yaw_belt", "skewness_yaw_belt", "amplitude_yaw_belt", "kurtosis_yaw_dumbbell", "skewness_yaw_dumbbell", "amplitude_yaw_dumbbell", "kurtosis_yaw_forearm", "skewness_yaw_forearm", "amplitude_yaw_forearm".
+Finally we do not need name and time related variables so we can drop them as well.
+
+```{r DataPreprocessing2}
+for (i in names(nalist[nalist>0])){
+    training[,eval(i)] <- NULL
+    testing[,eval(i)] <- NULL
+}
+
+droppedfactorvars <- c("kurtosis_yaw_belt", "skewness_yaw_belt", "amplitude_yaw_belt", "kurtosis_yaw_dumbbell", "skewness_yaw_dumbbell", "amplitude_yaw_dumbbell", "kurtosis_yaw_forearm", "skewness_yaw_forearm", "amplitude_yaw_forearm")
+for (i in droppedfactorvars){
+    training[,eval(i)] <- NULL
+    testing[,eval(i)] <- NULL
+}
+
+droppedtimevars <- c("user_name","raw_timestamp_part_1","raw_timestamp_part_2","cvtd_timestamp")
+for (i in droppedtimevars){
+    training[,eval(i)] <- NULL
+    testing[,eval(i)] <- NULL
+}
+
+droppedemptyvars <- c("kurtosis_roll_belt","kurtosis_picth_belt","skewness_roll_belt","skewness_roll_belt.1","max_yaw_belt","min_yaw_belt","kurtosis_roll_arm","kurtosis_picth_arm","kurtosis_yaw_arm","skewness_roll_arm","skewness_pitch_arm","skewness_yaw_arm","kurtosis_roll_dumbbell","kurtosis_picth_dumbbell","skewness_roll_dumbbell","skewness_pitch_dumbbell","max_yaw_dumbbell","min_yaw_dumbbell","kurtosis_roll_forearm","kurtosis_picth_forearm","skewness_roll_forearm","skewness_pitch_forearm","max_yaw_forearm","min_yaw_forearm")
+for (i in droppedemptyvars){
+    training[,eval(i)] <- NULL
+    testing[,eval(i)] <- NULL
+}
+```
+
+We'll find and eliminate highly correlated variables:
+```{r DataPreprocessing3}
+training[,3:7] %>% cor(use="complete.obs",method="spearman") %>% corrplot(type="lower",tl.col="black",diag=FALSE)
+
+training[,14:22] %>% cor(use="complete.obs",method="spearman") %>% corrplot(type="lower",tl.col="black",diag=FALSE)
+
+```
+
+##Cross Validation
+
+We make a training and validating dataset from the main training data and fit a model using various methods.
+
+```{r train and validation}
+
+set.seed(12345)
+inTrain <- createDataPartition(y=training$X,p=0.7,list=FALSE)
+train <- training[inTrain,]
+validation <- training[-inTrain,]
+setting <- trainControl(method="cv", 10)
+```
+
+First we apply Decision Trees using rpart and caret packages. It turns out that rpart outperforms caret comparing their accuracies.
+
+```{r Decision Tree}
+modFitDT <- train(classe ~ ., data = subset(train,select = -X),method="rpart",trControl=setting)
+DTpredicted <- predict(modFitDT,validation)
+confusionMatrix(DTpredicted, validation$classe)
+
+modFitDT <- rpart(classe ~ ., data = subset(train,select = -X), method="class", control = rpart.control(method = "cv", number = 10))
+DTpredicted <- predict(modFitDT,validation,type="class")
+confusionMatrix(DTpredicted, validation$classe)
+
+modFitDT <- rpart(classe ~ ., data = subset(train,select = -X), method="class")
+DTpredicted <- predict(modFitDT,validation,type="class")
+confusionMatrix(DTpredicted, validation$classe)
+```
+Note about method in rpart():One of "anova", "poisson", "class" or "exp". If method is missing then the routine tries to make an intelligent guess. If y is a survival object, then method = "exp" is assumed, if y has 2 columns then method = "poisson" is assumed, if y is a factor then method = "class" is assumed, otherwise method = "anova" is assumed. It is wisest to specify the method directly, especially as more criteria may added to the function in future.
+The out of sample error for these mothods are not satisfying (0.723, 0.49) and we need to investigate other methods.
+
+```{r Random Forest}
+modFitRF <- train(classe ~ ., data = subset(train,select = -X),method="rf",trControl=trainControl(method="cv", 10))
+RFpredicted <- predict(modFitRF,validation)
+confusionMatrix(RFpredicted, validation$classe)
+```
+
+```{r Boosting}
+modFitBt <- train(classe ~ ., method = "gbm", data = subset(train,select = -X),verbose = F,trControl = setting)
+BTpredicted <- predict(modFitBt,validation)
+confusionMatrix(BTpredicted, validation$classe)
+```
+
+##Prediction
+The Random Forest algorithm shows a good performance and is applied on the testing data to find predicted values.
+
+```{r prediction on testing}
+test_pred <- predict(modFitRF,testing)
+```
+
+##Submission on file
+```{r write on file}
+write.csv(test_pred,"output.csv")
+print(test_pred)
+```
+
